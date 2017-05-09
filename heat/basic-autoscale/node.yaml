@@ -1,0 +1,53 @@
+heat_template_version: 2014-10-16
+description: A base Cirros 0.3.4 server
+
+parameters:
+  server_image:
+    type: string
+    description: Name or ID of the host image in Glance
+    constraints:
+    - custom_constraint: glance.image
+    default: cirros
+
+  flavor:
+    type: string
+    description: Nova flavor to use for the instances
+    constraints:
+    - custom_constraint: nova.flavor
+    default: tiny
+
+  tenant_net:
+    type: string
+    description: Tenant network to connect to
+    default: cloudwest-network
+
+  key_name:
+    type: string
+    description: SSH key to import to VM
+
+resources:
+  server:
+    type: OS::Nova::Server
+    depends_on: volume
+    properties:
+      block_device_mapping:
+        - device_name: vda
+          delete_on_termination: true
+          volume_id: { get_resource: volume }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - port: { get_resource: port }
+
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: tenant_net }
+      security_groups:
+        - default
+
+  volume:
+    type: OS::Cinder::Volume
+    properties:
+      image: 'cirros'
+      size: 1
