@@ -1,0 +1,116 @@
+heat_template_version: 2014-10-16
+description: >
+  Deploy an autoscaling application
+
+parameters:
+  server_image:
+    type: string
+    description: Name or ID of the host image in Glance
+    constraints:
+    - custom_constraint: glance.image
+    default: cirros
+
+  flavor:
+    type: string
+    description: Nova flavor to use for the instances
+    constraints:
+    - custom_constraint: nova.flavor
+    default: tiny
+
+  autoscaling:
+    type: boolean
+    description: Automatically scale up/down
+    default: true
+
+  node_min:
+    type: number
+    description: Initial number of nodes to be deployed
+    constraints:
+    - allowed_values: [ 1 ]
+    default: 1
+
+  node_max:
+    type: number
+    description: Maximum number of nodes to scale to
+    constraints:
+    - allowed_values: [ 1, 2 ]
+    default: 2
+
+  tenant_net:
+    type: string
+    description: Tenant network to connect to
+    default: cloudwest-network
+
+  key_name:
+    type: string
+    description: SSH key to import to VM
+    default: cloudwest-key
+
+resources:
+  scaleup_group:
+    type: OS::Heat::AutoScalingGroup
+    properties:
+      cooldown: 60
+      desired_capacity: 1
+      max_size: { get_param: node_max }
+      min_size: {get_param: node_min }
+      resource:
+        type: node.yaml
+        properties:
+          flavor: { get_param: flavor }
+          key_name: {get_param: key_name }
+
+  scaleup_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: { get_resource: scaleup_group }
+      cooldown: 60
+      scaling_adjustment: 1
+
+  scaledown_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: { get_resource: scaleup_group }
+      cooldown: 60
+      scaling_adjustment: -1
+
+  cpu_alarm_high:
+    type: OS::Ceilometer::Alarm
+    properties:
+      meter_name: cpu_util
+      statistic: avg
+      period: 60
+      evaluation_periods: 1
+      threshold: 50
+      alarm_actions:
+        - {get_attr: [scaleup_policy, alarm_url]}
+      comparison_operator: gt
+
+  cpu_alarm_low:
+    type: OS::Ceilometer::Alarm
+    properties:
+      meter_name: cpu_util
+      statistic: avg
+      period: 60
+      evaluation_periods: 1
+      threshold: 10
+      alarm_actions:
+        - {get_attr: [scaledown_policy, alarm_url]}
+      comparison_operator: lt
+
+outputs:
+  scale_up_url:
+    description: >
+      This URL is the webhook to scale up the autoscaling group.  You
+      can invoke the scale-up operation by doing an HTTP POST to this
+      URL; no body nor extra headers are needed.
+    value: {get_attr: [scaleup_policy, alarm_url]}
+
+  scale_dn_url:
+    description: >
+      This URL is the webhook to scale down the autoscaling group.
+      You can invoke the scale-down operation by doing an HTTP POST to
+      this URL; no body nor extra headers are needed.
+    value: {get_attr: [scaledown_policy, alarm_url]}
